@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db, ALUNO_ID } from '../firebase/config';
+
 import {
   Alert,
   Image,
@@ -12,19 +15,14 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 
-export default function NewCallScreen() {
-  // Estados: "caixinhas" que guardam o que o usuário digita ou a foto que escolhe
+export default function NewCallScreen({ navigation }: any) {
+  const [saving, setSaving] = useState(false);
   const [description, setDescription] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
-
-  // Endereço já convertido, pronto para exibir na tela
   const [address, setAddress] = useState<string | null>(null);
-  // Controla o texto "Buscando localização..." enquanto aguardamos o GPS
   const [loadingLocation, setLoadingLocation] = useState(false);
 
-  // Função para tirar foto com a câmera
   async function handleTakePhoto() {
-    // 1. Pede permissão para usar a câmera
     const permission = await ImagePicker.requestCameraPermissionsAsync();
 
     if (!permission.granted) {
@@ -32,25 +30,22 @@ export default function NewCallScreen() {
       return;
     }
 
-    // 2. Abre a câmera
     const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true, // Permite cortar a foto
-      aspect: [4, 3],      // Proporção da imagem
-      quality: 0.7,        // Qualidade (70% para não pesar o app)
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.7,
     });
 
-    // 3. Se o usuário não cancelou, salva o endereço (URI) da foto
     if (!result.canceled) {
       setPhotoUri(result.assets[0].uri);
     }
   }
 
-  // Função para escolher da galeria
   async function handlePickFromGallery() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert('Permissão negada', 'Precisamos acessar suas fotos.');      
+      Alert.alert('Permissão negada', 'Precisamos acessar suas fotos.');
       return;
     }
 
@@ -66,51 +61,81 @@ export default function NewCallScreen() {
   }
 
   async function handleGetLocation() {
-    // 1. Pede permissão de localização em primeiro plano
     const permission = await Location.requestForegroundPermissionsAsync();
-  
+
     if (!permission.granted) {
-      Alert.alert('Permissão negada', 'Precisamos da localização para o check-in.');
+      Alert.alert(
+        'Permissão negada',
+        'Precisamos da localização para o check-in.'
+      );
       return;
     }
-  
+
     setLoadingLocation(true);
-  
+
     try {
-      // 2. Verifica se o GPS do aparelho está ligado
       const gpsAtivo = await Location.hasServicesEnabledAsync();
       if (!gpsAtivo) {
-        Alert.alert('GPS desligado', 'Ative a localização do aparelho e tente novamente.');
+        Alert.alert(
+          'GPS desligado',
+          'Ative a localização do aparelho e tente novamente.'
+        );
         return;
       }
-  
-      // 3. Captura latitude e longitude atuais
+
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-  
-      // 4. Reverse Geocoding: transforma coordenadas em endereço legível
+
       const [local] = await Location.reverseGeocodeAsync({
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
       });
-  
+
       if (local) {
         const enderecoFormatado = `${local.street ?? 'Endereço não identificado'}, ${local.city ?? ''} - ${local.region ?? ''}`;
         setAddress(enderecoFormatado);
       } else {
         setAddress('Endereço não encontrado para esta coordenada.');
       }
-      } catch (error) {
-        Alert.alert('Erro', 'Não foi possível obter a localização. Tente novamente.');
-      } finally {
-        setLoadingLocation(false);
-      }
+    } catch (error) {
+      Alert.alert(
+        'Erro',
+        'Não foi possível obter a localização. Tente novamente.'
+      );
+    } finally {
+      setLoadingLocation(false);
     }
+  }
+
+  async function handleCreateCall() {
+    setSaving(true);
+
+    try {
+      await addDoc(collection(db, 'alunos', ALUNO_ID, 'chamados'), {
+        description,
+        photoUri,
+        address,
+        status: 'aberto',
+        criadoEm: serverTimestamp(),
+      });
+
+      Alert.alert('Sucesso', 'Chamado registrado!');
+      setDescription('');
+      setPhotoUri(null);
+      setAddress(null);
+      navigation.navigate('CallList');
+    } catch (error) {
+      Alert.alert('Erro', 'Não foi possível salvar o chamado. Tente novamente.');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Novo Chamado</Text>
+
       <Text style={styles.label}>Descrição do problema</Text>
       <TextInput
         style={styles.input}
@@ -119,14 +144,15 @@ export default function NewCallScreen() {
         onChangeText={setDescription}
         multiline
       />
+
       <Text style={styles.label}>Foto do equipamento</Text>
-      {/*Renderização Condicional: Se tem foto, mostra a imagem. Se não, mostra o aviso.*/}
       {photoUri ? (
         <View>
           <Image source={{ uri: photoUri }} style={styles.photo} />
           <TouchableOpacity
             onPress={() => setPhotoUri(null)}
-            style={styles.removeButton}>
+            style={styles.removeButton}
+          >
             <Text style={styles.removeButtonText}>Remover foto</Text>
           </TouchableOpacity>
         </View>
@@ -137,15 +163,17 @@ export default function NewCallScreen() {
       )}
 
       <Text style={styles.label}>Localização do chamado</Text>
- 
+
       {loadingLocation ? (
         <Text style={styles.placeholderText}>Buscando localização...</Text>
       ) : address ? (
         <Text style={styles.addressText}>{address}</Text>
       ) : (
-        <Text style={styles.placeholderText}>Nenhuma localização registrada</Text>
+        <Text style={styles.placeholderText}>
+          Nenhuma localização registrada
+        </Text>
       )}
-      
+
       <TouchableOpacity
         style={[styles.button, styles.locationButton]}
         onPress={handleGetLocation}
@@ -157,43 +185,128 @@ export default function NewCallScreen() {
       </TouchableOpacity>
 
       <View style={styles.buttonRow}>
-        <TouchableOpacity style={[styles.button, styles.cameraButton]} onPress={handleTakePhoto}>
+        <TouchableOpacity
+          style={[styles.button, styles.cameraButton]}
+          onPress={handleTakePhoto}
+        >
           <Text style={styles.buttonText}>Câmera</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.button, styles.galleryButton]} onPress={handlePickFromGallery}>
+
+        <TouchableOpacity
+          style={[styles.button, styles.galleryButton]}
+          onPress={handlePickFromGallery}
+        >
           <Text style={styles.buttonText}>Galeria</Text>
         </TouchableOpacity>
       </View>
+
       <TouchableOpacity
-        style={[styles.button, styles.confirmButton, !description && styles.disabledButton]}
-        disabled={!description}
-        onPress={() => Alert.alert('Sucesso', 'Chamado registrado localmente!')}
+        style={[
+          styles.button,
+          styles.confirmButton,
+          (!description || saving) && styles.disabledButton,
+        ]}
+        disabled={!description || saving}
+        onPress={handleCreateCall}
       >
-        <Text style={styles.buttonText}>Criar Chamado</Text>
+        <Text style={styles.buttonText}>
+          {saving ? 'Salvando...' : 'Criar Chamado'}
+        </Text>
       </TouchableOpacity>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#f5f5f5' },
-  content: { padding: 20, paddingBottom: 40 },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20 },
-  label: { fontSize: 14, fontWeight: '600', marginTop: 16, marginBottom: 8 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, backgroundColor: '#fff', padding: 12, minHeight: 80, textAlignVertical: 'top' },
-  placeholder: { height: 160, borderRadius: 8, borderWidth: 1, borderColor: '#ccc', borderStyle: 'dashed', backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-  placeholderText: { color: '#999' },
-  photo: { width: '100%', height: 200, borderRadius: 8 },
-  removeButton: { marginTop: 8, alignItems: 'center' },
-  removeButtonText: { color: '#d32f2f', fontWeight: 'bold' },
-  buttonRow: { flexDirection: 'row', marginTop: 16, gap: 10 },
-  button: { flex: 1, borderRadius: 8, padding: 14, alignItems: 'center' },
-  cameraButton: { backgroundColor: '#1565c0' },
-  galleryButton: { backgroundColor: '#6a1b9a' },
-  confirmButton: { backgroundColor: '#2e7d32', marginTop: 20 },
-  disabledButton: { backgroundColor: '#a5d6a7' },
-  buttonText: { color: '#fff', fontWeight: 'bold' },
-  addressText: { fontSize: 14, color: '#333', marginBottom: 8 },
-  locationButton: { backgroundColor: '#00695c', marginBottom: 16 },
+  screen: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  content: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    padding: 12,
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  placeholder: {
+    height: 160,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderStyle: 'dashed',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  placeholderText: {
+    color: '#999',
+  },
+  photo: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+  },
+  addressText: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 8,
+  },
+  locationButton: {
+    backgroundColor: '#00695c',
+    marginBottom: 16,
+  },
+  removeButton: {
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  removeButtonText: {
+    color: '#d32f2f',
+    fontWeight: 'bold',
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    marginTop: 16,
+    gap: 10,
+  },
+  button: {
+    flex: 1,
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+  },
+  cameraButton: {
+    backgroundColor: '#1565c0',
+  },
+  galleryButton: {
+    backgroundColor: '#6a1b9a',
+  },
+  confirmButton: {
+    backgroundColor: '#2e7d32',
+    marginTop: 20,
+  },
+  disabledButton: {
+    backgroundColor: '#a5d6a7',
+  },
+  buttonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
 });
-
