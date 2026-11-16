@@ -11,12 +11,14 @@ import {
 } from 'react-native';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db, ALUNO_ID } from '../firebase/config';
+import * as Notifications from 'expo-notifications';
 
 type Chamado = {
   description: string;
   photoUri?: string | null;
   address?: string | null;
   status: string;
+  slaNotificationId?: string;
 };
 
 export default function CallDetailScreen({ route }: any) {
@@ -52,6 +54,15 @@ export default function CallDetailScreen({ route }: any) {
     try {
       const docRef = doc(db, 'alunos', ALUNO_ID, 'chamados', chamadoId);
       await updateDoc(docRef, { status: novoStatus });
+
+      // Se o chamado foi atendido a tempo,
+      // cancela o alerta de SLA que ainda não disparou
+      if (
+        (novoStatus === 'atendendo' || novoStatus === 'cancelado') &&
+        chamado?.slaNotificationId
+      ) {
+        await Notifications.cancelScheduledNotificationAsync(chamado.slaNotificationId);
+      }
 
       // Atualiza o estado local para refletir na tela imediatamente
       setChamado((prev) => (prev ? { ...prev, status: novoStatus } : null));

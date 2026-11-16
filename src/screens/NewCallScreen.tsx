@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, ALUNO_ID } from '../firebase/config';
+import * as Notifications from 'expo-notifications';
+
+const SLA_SECONDS = 10; // em produção, substituir por um valor real
 
 import {
   Alert,
@@ -112,13 +115,40 @@ export default function NewCallScreen({ navigation }: any) {
     setSaving(true);
 
     try {
-      await addDoc(collection(db, 'alunos', ALUNO_ID, 'chamados'), {
+      const docRef = await addDoc(collection(db, 'alunos', ALUNO_ID, 'chamados'), {
         description,
         photoUri,
         address,
         status: 'aberto',
         criadoEm: serverTimestamp(),
       });
+
+      // Pede permissão para enviar notificações
+      const permission = await Notifications.requestPermissionsAsync();
+
+      if (permission.granted) {
+        // Agenda a notificação de alerta do SLA
+        const notificationId = await Notifications.scheduleNotificationAsync({
+          content: {
+            title: 'TechCall - Alerta de SLA',
+            body: 'O prazo de atendimento de um chamado expirou!',
+            data: { chamadoId: docRef.id },
+          },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: SLA_SECONDS,
+          },
+        });
+
+        // Salva o id da notificação no Firestore para poder cancelá-la se atendido
+        await updateDoc(docRef, { slaNotificationId: notificationId });
+      } else {
+        // Orienta o usuário caso a permissão tenha sido negada
+        Alert.alert(
+          'Permissão de Notificação Negada',
+          'Você não receberá alertas de SLA. Para ativar, habilite as notificações nas configurações do seu celular.'
+        );
+      }
 
       Alert.alert('Sucesso', 'Chamado registrado!');
       setDescription('');
